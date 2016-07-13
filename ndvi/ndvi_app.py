@@ -30,18 +30,18 @@ def make_ndvi_config(index, config, **query):
         _LOG.error("Source DatasetType %s does not exist", config['source_type'])
         return 1
 
-    output_type = DatasetType(source_type.metadata_type, deepcopy(source_type.definition))
-    output_type.definition['name'] = config['output_type']
-    output_type.definition['managed'] = True
-    output_type.definition['description'] = config['description']
-    output_type.definition['storage'] = config['storage']
-    output_type.metadata['format'] = {'name': 'NetCDF'}
+    output_type_definition = deepcopy(source_type.definition)
+    output_type_definition['name'] = config['output_type']
+    output_type_definition['managed'] = True
+    output_type_definition['description'] = config['description']
+    output_type_definition['storage'] = config['storage']
+    output_type_definition['metadata']['format'] = {'name': 'NetCDF'}
+    output_type_definition['metadata']['product_type'] = config.get('product_type', 'fractional_cover')
 
     var_param_keys = {'zlib', 'complevel', 'shuffle', 'fletcher32', 'contiguous', 'attrs'}
 
-    output_type.definition['measurements'] = [{k: v for k, v in measurement.items() if k not in var_param_keys}
+    output_type_definition['measurements'] = [{k: v for k, v in measurement.items() if k not in var_param_keys}
                                               for measurement in config['measurements']]
-
     chunking = config['storage']['chunking']
     chunking = [chunking[dim] for dim in config['storage']['dimension_order']]
 
@@ -52,6 +52,8 @@ def make_ndvi_config(index, config, **query):
         variable_params[varname]['chunksizes'] = chunking
 
     config['variable_params'] = variable_params
+
+    output_type = DatasetType(source_type.metadata_type, output_type_definition)
 
     if not dry_run:
         _LOG.info('Created DatasetType %s', output_type.name)
@@ -125,11 +127,16 @@ def get_app_metadata(config):
 
 
 def do_ndvi_task(config, task):
+    output_type = config['ndvi_dataset_type']
+    nodata_value = output_type.definition['measurements']['ndvi'].nodata
+
     measurements = ['red', 'nir']
 
     nbar = GridWorkflow.load(task['nbar'], measurements)
 
-    ndvi_array = (nbar.red - nbar.nir) / (nbar.red + nbar.nir)
+    ndvi_array = (nbar.nir - nbar.red) / (nbar.nir + nbar.red)
+    no_data_mask = (nbar.nir == nbar.nir.nodata) | (nbar.red == nbar.red.nodata)
+    ndvi_array.values[no_data_mask.values] = nodata_value
     ndvi_array.attrs = nbar.red.attrs
 
     ndvi = xarray.Dataset(ndvi_array, dims=nbar.red.dims, coords=nbar.coords, attrs=nbar.attrs)
@@ -137,7 +144,6 @@ def do_ndvi_task(config, task):
     global_attributes = config['global_attributes']
     variable_params = config['variable_params']
     file_path = Path(task['filename'])
-    output_type = config['ndvi_dataset_type']
 
     def _make_dataset(labels, sources):
         assert len(sources)
@@ -154,7 +160,7 @@ def do_ndvi_task(config, task):
         return dataset
     sources = task['nbar']['sources']
     datasets = xr_apply(sources, _make_dataset, dtype='O')
-    nbar['dataset'] = datasets_to_doc(datasets)
+    ndvi['dataset'] = datasets_to_doc(datasets)
 
     write_dataset_to_netcdf(ndvi, global_attributes, variable_params, Path(file_path))
 
@@ -183,7 +189,7 @@ def ndvi_app(index, config, tasks, executor, dry_run, *ars, **kwargs):
         try:
             datasets = executor.result(result)
             for dataset in datasets.values:
-                index.datasets.add(dataset)
+                index.datasets.add(dataset, skip_sources=True)
             successful += 1
         except Exception as err:  # pylint: disable=broad-except
             _LOG.exception('Task failed: %s', err)
