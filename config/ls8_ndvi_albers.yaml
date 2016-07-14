@@ -34,7 +34,7 @@ global_attributes:
   product_version: 2
   publisher_email: "earth.observation@ga.gov.au"
   publisher_name: "Section Leader, Operations Section, NEMO, Geoscience Australia"
-  publisher_url: "+61 2 6249 9999"
+  publisher_url: 'http://www.ga.gov.au'
   license: CC BY Attribution 4.0 International License
   coverage_content_type: "physicalMeasurement"
   cdm_data_type: "Grid"
