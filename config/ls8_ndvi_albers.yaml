@@ -63,11 +63,9 @@ storage:
 
 measurements:
     - name: ndvi
-      units: "units"
+      units: '1'
       dtype: int16
-      nodata: -999
-      resampling_method: nearest
-      src_varname: '1'
+      nodata: -32768
       zlib: True
       fletcher32: True
       attrs:
