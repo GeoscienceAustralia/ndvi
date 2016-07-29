@@ -1,6 +1,7 @@
 from __future__ import absolute_import, print_function
 
 import logging
+import os
 from copy import deepcopy
 from datetime import datetime
 import functools
@@ -24,6 +25,7 @@ _LOG = logging.getLogger('agdc-ndvi')
 
 def make_ndvi_config(index, config, **query):
     dry_run = query.get('dry_run', False)
+    config['overwrite'] = query.get('overwrite', False)
 
     source_type = index.products.get_by_name(config['source_type'])
     if not source_type:
@@ -36,15 +38,17 @@ def make_ndvi_config(index, config, **query):
     output_type_definition['description'] = config['description']
     output_type_definition['storage'] = config['storage']
     output_type_definition['metadata']['format'] = {'name': 'NetCDF'}
-    output_type_definition['metadata']['product_type'] = config.get('product_type', 'fractional_cover')
+    output_type_definition['metadata']['product_type'] = config.get('product_type', 'ndvi')
 
-    var_param_keys = {'zlib', 'complevel', 'shuffle', 'fletcher32', 'contiguous', 'attrs'}
+    var_def_keys = {'name', 'dtype', 'nodata', 'units', 'aliases', 'spectral_definition', 'flags_definition'}
 
-    output_type_definition['measurements'] = [{k: v for k, v in measurement.items() if k not in var_param_keys}
+    output_type_definition['measurements'] = [{k: v for k, v in measurement.items() if k in var_def_keys}
                                               for measurement in config['measurements']]
+
     chunking = config['storage']['chunking']
     chunking = [chunking[dim] for dim in config['storage']['dimension_order']]
 
+    var_param_keys = {'zlib', 'complevel', 'shuffle', 'fletcher32', 'contiguous', 'attrs'}
     variable_params = {}
     for mapping in config['measurements']:
         varname = mapping['name']
@@ -58,6 +62,9 @@ def make_ndvi_config(index, config, **query):
     if not dry_run:
         _LOG.info('Created DatasetType %s', output_type.name)
         output_type = index.products.add(output_type)
+
+    if not os.access(config['location'], os.W_OK):
+        _LOG.warn('Current user appears not have write access output location: %s', config['location'])
 
     config['nbar_dataset_type'] = source_type
     config['ndvi_dataset_type'] = output_type
@@ -116,7 +123,7 @@ def get_app_metadata(config):
     doc = {
         'lineage': {
             'algorithm': {
-                'name': 'datacube-ingest',
+                'name': 'datacube-ndvi',
                 'version': config.get('version', 'unknown'),
                 'repo_url': 'https://github.com/GeoscienceAustralia/ndvi.git',
                 'parameters': {'configuration_file': config.get('app_config_file', 'unknown')}
@@ -144,6 +151,7 @@ def do_ndvi_task(config, task):
     global_attributes = config['global_attributes']
     variable_params = config['variable_params']
     file_path = Path(task['filename'])
+    output_type = config['ndvi_dataset_type']
 
     def _make_dataset(labels, sources):
         assert len(sources)
@@ -162,6 +170,9 @@ def do_ndvi_task(config, task):
     datasets = xr_apply(sources, _make_dataset, dtype='O')
     ndvi['dataset'] = datasets_to_doc(datasets)
 
+    if config.get('overwrite', False) and file_path.exists():
+        file_path.unlink()
+
     write_dataset_to_netcdf(ndvi, global_attributes, variable_params, Path(file_path))
 
     return datasets
@@ -173,7 +184,8 @@ app_name = 'ndvi'
 @click.command(name=app_name)
 @ui.pass_index(app_name=app_name)
 @click.option('--dry-run', is_flag=True, default=False, help='Check if everything is ok')
-@click.option('--year', help='Limit the process to a particular year')
+@click.option('--overwrite', is_flag=True, default=False, help='Overwrite existing (un-indexed) files')
+@click.option('--year', type=click.IntRange(1960, 2060), help='Limit the process to a particular year')
 @task_app_options
 @task_app(make_config=make_ndvi_config, make_tasks=make_ndvi_tasks)
 def ndvi_app(index, config, tasks, executor, dry_run, *ars, **kwargs):
@@ -182,14 +194,15 @@ def ndvi_app(index, config, tasks, executor, dry_run, *ars, **kwargs):
     results = []
     for task in tasks:
         click.echo('Running task: {}'.format(task))
-        results.append(executor.submit(do_ndvi_task, config=config, task=task))
+        if not dry_run:
+            results.append(executor.submit(do_ndvi_task, config=config, task=task))
 
     successful = failed = 0
     for result in executor.as_completed(results):
         try:
             datasets = executor.result(result)
             for dataset in datasets.values:
-                index.datasets.add(dataset, skip_sources=True)
+                index.datasets.add(dataset)
             successful += 1
         except Exception as err:  # pylint: disable=broad-except
             _LOG.exception('Task failed: %s', err)
@@ -197,7 +210,3 @@ def ndvi_app(index, config, tasks, executor, dry_run, *ars, **kwargs):
             continue
 
     click.echo('%d successful, %d failed' % (successful, failed))
-
-
-if __name__ == '__main__':
-    ndvi_app()
