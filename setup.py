@@ -5,7 +5,7 @@ Setup
 This compiles all the Fortran extensions.
 """
 
-from numpy.distutils.core import setup
+from setuptools import setup, find_packages
 
 setup(name='ndvi',
       version='2.0',
@@ -16,9 +16,7 @@ setup(name='ndvi',
       author='AGDC Collaboration',
       maintainer='AGDC Collaboration',
       maintainer_email='',
-      packages=[
-          'ndvi'
-      ],
+      packages=find_packages(),
       install_requires=[
           'datacube',
       ],

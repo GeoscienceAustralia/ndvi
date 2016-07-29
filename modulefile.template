@@ -1,6 +1,6 @@
 #%Module########################################################################
 ##
-## ${package_name} modulefile
+## ${module_name} modulefile
 ##
 
 proc ModulesHelp { } {
@@ -19,8 +19,5 @@ module-whatis   "${module_description} ${version}"
 if { ! [is-loaded ${agdc_module}] } {
     module load ${agdc_module}
 }
-prepend-path PATH ${module_dest}/scripts
-
-if { [ module-info mode remove ] } {
-    module unload ${agdc_module}
-}
+prepend-path PYTHONPATH ${python_dest}
+prepend-path PATH ${module_dest}/bin:${module_dest}/scripts
