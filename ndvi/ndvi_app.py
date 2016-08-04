@@ -15,6 +15,7 @@ from datacube.api.grid_workflow import GridWorkflow
 from datacube.model import DatasetType, GeoPolygon, Range
 from datacube.model.utils import make_dataset, xr_apply, datasets_to_doc
 from datacube.storage.storage import write_dataset_to_netcdf
+from datacube.storage.masking import mask_valid_data
 from datacube.ui import click as ui
 from datacube.ui.task_app import task_app, task_app_options, get_full_lineage
 from datacube.utils import intersect_points, union_points
@@ -136,17 +137,25 @@ def get_app_metadata(config):
 def do_ndvi_task(config, task):
     output_type = config['ndvi_dataset_type']
     nodata_value = output_type.definition['measurements']['ndvi'].nodata
+    output_dtype = output_type.definition['measurements']['ndvi'].dtype
+    output_units = output_type.definition['measurements']['ndvi'].units
+    output_scale = 10000
+    nodata_value = output_dtype.type(nodata_value)
 
     measurements = ['red', 'nir']
 
     nbar = GridWorkflow.load(task['nbar'], measurements)
 
-    ndvi_array = (nbar.nir - nbar.red) / (nbar.nir + nbar.red)
-    no_data_mask = (nbar.nir == nbar.nir.nodata) | (nbar.red == nbar.red.nodata)
-    ndvi_array.values[no_data_mask.values] = nodata_value
-    ndvi_array.attrs = nbar.red.attrs
+    nbar_masked = mask_valid_data(nbar)
+    ndvi_array = (nbar_masked.nir - nbar_masked.red) / (nbar_masked.nir + nbar_masked.red)
+    ndvi_out = (ndvi_array * output_scale).fillna(nodata_value).astype(output_dtype)
+    ndvi_out.attrs = {
+        'crs': nbar.attrs['crs'],
+        'units': output_units,
+        'nodata': nodata_value,
+    }
 
-    ndvi = xarray.Dataset(ndvi_array, dims=nbar.red.dims, coords=nbar.coords, attrs=nbar.attrs)
+    ndvi = xarray.Dataset(ndvi_out, dims=nbar.red.dims, coords=nbar.coords, attrs=nbar.attrs)
 
     global_attributes = config['global_attributes']
     variable_params = config['variable_params']
