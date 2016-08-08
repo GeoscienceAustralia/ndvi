@@ -1,5 +1,7 @@
 from __future__ import absolute_import, print_function
 
+import errno
+import itertools
 import logging
 import os
 from copy import deepcopy
@@ -22,11 +24,15 @@ from datacube.utils import intersect_points, union_points
 
 
 _LOG = logging.getLogger('agdc-ndvi')
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+ch.setFormatter(formatter)
+_LOG.addHandler(ch)
 
 
 def make_ndvi_config(index, config, **query):
     dry_run = query.get('dry_run', False)
-    config['overwrite'] = query.get('overwrite', False)
 
     source_type = index.products.get_by_name(config['source_type'])
     if not source_type:
@@ -135,12 +141,18 @@ def get_app_metadata(config):
 
 
 def do_ndvi_task(config, task):
+    global_attributes = config['global_attributes']
+    variable_params = config['variable_params']
+    file_path = Path(task['filename'])
     output_type = config['ndvi_dataset_type']
     nodata_value = output_type.definition['measurements']['ndvi'].nodata
     output_dtype = output_type.definition['measurements']['ndvi'].dtype
     output_units = output_type.definition['measurements']['ndvi'].units
     output_scale = 10000
     nodata_value = output_dtype.type(nodata_value)
+
+    if file_path.exists():
+        raise OSError(errno.EEXIST, 'Output file already exists', str(file_path))
 
     measurements = ['red', 'nir']
 
@@ -156,11 +168,6 @@ def do_ndvi_task(config, task):
     }
 
     ndvi = xarray.Dataset(ndvi_out, dims=nbar.red.dims, coords=nbar.coords, attrs=nbar.attrs)
-
-    global_attributes = config['global_attributes']
-    variable_params = config['variable_params']
-    file_path = Path(task['filename'])
-    output_type = config['ndvi_dataset_type']
 
     def _make_dataset(labels, sources):
         assert len(sources)
@@ -179,9 +186,6 @@ def do_ndvi_task(config, task):
     datasets = xr_apply(sources, _make_dataset, dtype='O')
     ndvi['dataset'] = datasets_to_doc(datasets)
 
-    if config.get('overwrite', False) and file_path.exists():
-        file_path.unlink()
-
     write_dataset_to_netcdf(ndvi, global_attributes, variable_params, Path(file_path))
 
     return datasets
@@ -193,29 +197,68 @@ app_name = 'ndvi'
 @click.command(name=app_name)
 @ui.pass_index(app_name=app_name)
 @click.option('--dry-run', is_flag=True, default=False, help='Check if everything is ok')
-@click.option('--overwrite', is_flag=True, default=False, help='Overwrite existing (un-indexed) files')
 @click.option('--year', type=click.IntRange(1960, 2060), help='Limit the process to a particular year')
+@click.option('--backlog', type=click.IntRange(1, 100000), default=3200, help='Number of tasks to queue at the start ')
 @task_app_options
 @task_app(make_config=make_ndvi_config, make_tasks=make_ndvi_tasks)
-def ndvi_app(index, config, tasks, executor, dry_run, *ars, **kwargs):
+def ndvi_app(index, config, tasks, executor, dry_run, backlog, *args, **kwargs):
     click.echo('Starting NDVI processing...')
 
+    if dry_run:
+        existing_files = []
+        total = 0
+        for task in tasks:
+            total += 1
+            file_path = Path(task['filename'])
+            file_info = ''
+            if file_path.exists():
+                existing_files.append(file_path)
+                file_info = ' - ALREADY EXISTS: {}'.format(file_path)
+            click.echo('Task: {}{}'.format(task['tile_index'], file_info))
+
+        if existing_files:
+            if click.confirm('There were {} existing files found that are not indexed. Delete those files now?'.format(
+                    len(existing_files))):
+                for file_path in existing_files:
+                    file_path.unlink()
+
+        click.echo('{total} tasks total to be run ({valid} valid tasks, {invalid} invalid tasks)'.format(
+            total=total, valid=total-len(existing_files), invalid=len(existing_files)
+        ))
+        click.echo('Dry-run complete')
+        return 0
+
     results = []
-    for task in tasks:
-        click.echo('Running task: {}'.format(task))
-        if not dry_run:
-            results.append(executor.submit(do_ndvi_task, config=config, task=task))
+    tasks_backlog = itertools.islice(tasks, backlog)
+    for task in tasks_backlog:
+        _LOG.info('Queuing task: {}'.format(task['tile_index']))
+        results.append(executor.submit(do_ndvi_task, config=config, task=task))
+
+    _LOG.info('Backlog queue filled, waiting for first result...')
 
     successful = failed = 0
-    for result in executor.as_completed(results):
+    while results:
+        result, results = executor.next_completed(results, None)
+
+        # submit a new task to replace the one we just finished
+        task = next(tasks, None)
+        if task:
+            _LOG.info('Queuing task: {}'.format(task['tile_index']))
+            results.append(executor.submit(do_ndvi_task, config=config, task=task))
+
+        # Process the result
         try:
             datasets = executor.result(result)
             for dataset in datasets.values:
-                index.datasets.add(dataset)
+                index.datasets.add(dataset, skip_sources=True)
+                _LOG.info('Dataset added')
             successful += 1
         except Exception as err:  # pylint: disable=broad-except
             _LOG.exception('Task failed: %s', err)
             failed += 1
             continue
+        finally:
+            # Release the task to free memory so there is no leak in executor/scheduler/worker process
+            executor.release(result)
 
-    click.echo('%d successful, %d failed' % (successful, failed))
+    _LOG.info('%d successful, %d failed' % (successful, failed))
