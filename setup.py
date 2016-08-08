@@ -2,13 +2,13 @@
 Setup
 -----
 
-This compiles all the Fortran extensions.
 """
+import os
 
 from setuptools import setup, find_packages
 
 setup(name='ndvi',
-      version='2.0',
+      version=os.environ.get('version', 0.0),
       description='Geoscience Australia - NDVI for AGDC',
       long_description=open('README.md', 'r').read(),
       license='Apache License 2.0',
