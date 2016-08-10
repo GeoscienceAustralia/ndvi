@@ -12,6 +12,7 @@ import click
 from pandas import to_datetime
 from pathlib import Path
 import xarray
+import numpy as np
 
 from datacube.api.grid_workflow import GridWorkflow
 from datacube.model import DatasetType, GeoPolygon, Range
@@ -149,7 +150,7 @@ def do_ndvi_task(config, task):
     output_dtype = output_type.measurements['ndvi']['dtype']
     output_units = output_type.measurements['ndvi']['units']
     output_scale = 10000
-    nodata_value = output_dtype.type(nodata_value)
+    nodata_value = np.dtype(output_dtype).type(nodata_value)
 
     if file_path.exists():
         raise OSError(errno.EEXIST, 'Output file already exists', str(file_path))
@@ -167,7 +168,7 @@ def do_ndvi_task(config, task):
         'nodata': nodata_value,
     }
 
-    ndvi = xarray.Dataset(ndvi_out, dims=nbar.red.dims, coords=nbar.coords, attrs=nbar.attrs)
+    ndvi = xarray.Dataset({'ndvi': ndvi_out}, coords=nbar.coords, attrs=nbar.attrs)
 
     def _make_dataset(labels, sources):
         assert len(sources)
