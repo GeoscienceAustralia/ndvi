@@ -145,9 +145,9 @@ def do_ndvi_task(config, task):
     variable_params = config['variable_params']
     file_path = Path(task['filename'])
     output_type = config['ndvi_dataset_type']
-    nodata_value = output_type.definition['measurements']['ndvi'].nodata
-    output_dtype = output_type.definition['measurements']['ndvi'].dtype
-    output_units = output_type.definition['measurements']['ndvi'].units
+    nodata_value = output_type.measurements['ndvi']['nodata']
+    output_dtype = output_type.measurements['ndvi']['dtype']
+    output_units = output_type.measurements['ndvi']['units']
     output_scale = 10000
     nodata_value = output_dtype.type(nodata_value)
 
