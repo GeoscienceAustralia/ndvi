@@ -10,7 +10,7 @@ file_path_template: 'LS5_TM_NDVI/{tile_index[0]}_{tile_index[1]}/LS5_TM_NDVI_357
 global_attributes:
   title: "Normalised Difference Vegetation Index 25 v2"
   summary: |
-    Live green plants absorb solar radiation in the photosynthetically active radiation (PAR) spectral region, which they use as a source of energy in the process of photosynthesis. Leaf cells have also evolved to reflect, scatter and re-emit solar radiation in the near-infrared spectral region. The pigment in plant leaves, chlorophyll, strongly absorbs visible light (from 0.4 to 0.7 µm) for use in photosynthesis. The cell structure of the leaves, on the other hand, strongly reflects near-infrared light (from 0.7 to 1.1 µm). Hence, live green plants appear relatively dark in the PAR and relatively bright in the near-infrared.
+    Live green plants absorb solar radiation in the photosynthetically active radiation (PAR) spectral region, which they use as a source of energy in the process of photosynthesis. Leaf cells have also evolved to reflect, scatter and re-emit solar radiation in the near-infrared spectral region. The pigment in plant leaves, chlorophyll, strongly absorbs visible light (from 0.4 to 0.7 micrometres) for use in photosynthesis. The cell structure of the leaves, on the other hand, strongly reflects near-infrared light (from 0.7 to 1.1 micrometres). Hence, live green plants appear relatively dark in the PAR and relatively bright in the near-infrared.
 
     By contrast, clouds and snow tend to be rather bright in the red (as well as other visible wavelengths) and quite dark in the near-infrared.
 
