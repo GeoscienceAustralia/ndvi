@@ -44,7 +44,7 @@ global_attributes:
     - Carlson, T.N. and Ripley, D.A., 1997. On the relation between NDVI, fractional vegetation cover, and leaf area index. Remote sensing of Environment, 62(3), pp.241-252.
     - Roy, D.P., Kovalskyy, V., Zhang, H.K., Vermote, E.F., Yan, L., Kumar, S.S. and Egorov, A., 2016. Characterization of Landsat-7 to Landsat-8 reflective wavelength and normalized difference vegetation index continuity. Remote Sensing of Environment.
     - Tucker, C.J. (1979) 'Red and Photographic Infrared Linear Combinations for Monitoring Vegetation', Remote Sensing of Environment, 8(2),127-150
-    - Zhu, Z., Fu, Y., Woodcock, C.E., Olofsson, P., Vogelmann, J.E., Holden, C., Wang, M., Dai, S. and Yu, Y., 2016. Including land cover change in analysis of greenness trends using all available Landsat 5, 7, and 8 images: A case study from Guangzhou, China (2000–2014). Remote Sensing of Environment.
+    - Zhu, Z., Fu, Y., Woodcock, C.E., Olofsson, P., Vogelmann, J.E., Holden, C., Wang, M., Dai, S. and Yu, Y., 2016. Including land cover change in analysis of greenness trends using all available Landsat 5, 7, and 8 images: A case study from Guangzhou, China (2000-2014). Remote Sensing of Environment.
 storage:
   driver: NetCDF CF
 
