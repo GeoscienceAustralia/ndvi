@@ -25,11 +25,6 @@ from datacube.utils import intersect_points, union_points
 
 
 _LOG = logging.getLogger('agdc-ndvi')
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-ch.setFormatter(formatter)
-_LOG.addHandler(ch)
 
 
 def make_ndvi_config(index, config, **query):
@@ -262,4 +257,5 @@ def ndvi_app(index, config, tasks, executor, dry_run, backlog, *args, **kwargs):
             # Release the task to free memory so there is no leak in executor/scheduler/worker process
             executor.release(result)
 
-    _LOG.info('%d successful, %d failed' % (successful, failed))
+    click.echo('%d successful, %d failed' % (successful, failed))
+    _LOG.info('Completed: %d successful, %d failed' % (successful, failed))
