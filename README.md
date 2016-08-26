@@ -1,7 +1,22 @@
 # NDVI
 
+#### Normalised Difference Vegetation Index
+
+Live green plants absorb solar radiation in the photosynthetically active radiation (PAR) spectral region, which they use as a source of energy in the process of photosynthesis. Leaf cells have also evolved to reflect, scatter and re-emit solar radiation in the near-infrared spectral region. The pigment in plant leaves, chlorophyll, strongly absorbs visible light (from 0.4 to 0.7 micrometres) for use in photosynthesis. The cell structure of the leaves, on the other hand, strongly reflects near-infrared light (from 0.7 to 1.1 micrometres). Hence, live green plants appear relatively dark in the PAR and relatively bright in the near-infrared. 
+
+By contrast, clouds and snow tend to be rather bright in the red (as well as other visible wavelengths) and quite dark in the near-infrared.  
+
+
 ## Installation
 To install the module on raijin:
+
+### Update Collection Management Interface system
+
+Go to http://52.62.11.43/validate/11
+
+Ensure that the global attributes from CMI match the global attributes in the config files, and update appropriately.
+
+### Download from GitHub
 
 Checkout the tagged branch you wish to install to temp directory:
 
