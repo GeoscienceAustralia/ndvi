@@ -18,7 +18,7 @@ global_attributes:
 
     (NIR-RED)/(NIR+RED) - where RED and NIR stand for the spectral reflectance measurements acquired in the red and near-infrared regions, respectively.
 
-    NDVI values range between -1 and +1, and have been scaled by 10000 to be stored as intgeers between -10000 and +10000.
+    NDVI values range between -1 and +1, and have been scaled by 10000 to be stored as intgers between -10000 and +10000.
 
     Negative values of NDVI (values between 0 and -1) usually correspond to non vegetation targets such as water.
 
