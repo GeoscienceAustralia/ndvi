@@ -6,7 +6,6 @@ import logging
 import os
 from copy import deepcopy
 from datetime import datetime
-import functools
 
 import click
 from pandas import to_datetime
@@ -20,16 +19,14 @@ from datacube.model.utils import make_dataset, xr_apply, datasets_to_doc
 from datacube.storage.storage import write_dataset_to_netcdf
 from datacube.storage.masking import mask_valid_data
 from datacube.ui import click as ui
-from datacube.ui.task_app import task_app, task_app_options, get_full_lineage
+from datacube.ui.task_app import task_app, task_app_options, check_existing_files
 from datacube.utils import intersect_points, union_points
 
 
 _LOG = logging.getLogger('agdc-ndvi')
 
 
-def make_ndvi_config(index, config, **query):
-    dry_run = query.get('dry_run', False)
-
+def make_ndvi_config(index, config, dry_run=False, **query):
     source_type = index.products.get_by_name(config['source_type'])
     if not source_type:
         _LOG.error("Source DatasetType %s does not exist", config['source_type'])
@@ -89,7 +86,6 @@ def make_ndvi_tasks(index, config, **kwargs):
     workflow = GridWorkflow(index, output_type.grid_spec)
 
     # TODO: Filter query to valid options
-
     query = {}
     if 'year' in kwargs:
         year = int(kwargs['year'])
@@ -98,24 +94,12 @@ def make_ndvi_tasks(index, config, **kwargs):
     tiles_in = workflow.list_tiles(product=input_type.name, **query)
     tiles_out = workflow.list_tiles(product=output_type.name, **query)
 
-    # TODO: Move get_full_lineage & update_sources to GridWorkflow/Datacube/model?
-    def update_sources(sources):
-        return tuple(get_full_lineage(index, dataset.id) for dataset in sources)
-
-    def update_tile(tile):
-        for i in range(tile['sources'].size):
-            tile['sources'].values[i] = update_sources(tile['sources'].values[i])
-        return tile
-
-    def make_task(tile, **kwargs):
-        nbar = update_tile(tile.copy())
-        task = {
-            'nbar': nbar
-        }
-        task.update(kwargs)
+    def make_task(tile, **task_kwargs):
+        task = dict(nbar=workflow.update_tile_lineage(tile))
+        task.update(task_kwargs)
         return task
 
-    tasks = [make_task(tile, tile_index=key, filename=get_filename(config, tile_index=key, sources=tile['sources']))
+    tasks = [make_task(tile, tile_index=key, filename=get_filename(config, tile_index=key, sources=tile.sources))
              for key, tile in tiles_in.items() if key not in tiles_out]
 
     _LOG.info('%s tasks discovered', len(tasks))
@@ -136,39 +120,43 @@ def get_app_metadata(config):
     return doc
 
 
+def calculate_ndvi(nbar, nodata, dtype, units):
+    nbar_masked = mask_valid_data(nbar)
+    ndvi_array = (nbar_masked.nir - nbar_masked.red) / (nbar_masked.nir + nbar_masked.red)
+    ndvi_out = (ndvi_array * 10000).fillna(nodata).astype(dtype)
+    ndvi_out.attrs = {
+        'crs': nbar.attrs['crs'],
+        'units': units,
+        'nodata': nodata,
+    }
+
+    ndvi = xarray.Dataset({'ndvi': ndvi_out}, attrs=nbar.attrs)
+    return ndvi
+
+
 def do_ndvi_task(config, task):
     global_attributes = config['global_attributes']
     variable_params = config['variable_params']
     file_path = Path(task['filename'])
     output_type = config['ndvi_dataset_type']
-    nodata_value = output_type.measurements['ndvi']['nodata']
-    output_dtype = output_type.measurements['ndvi']['dtype']
-    output_units = output_type.measurements['ndvi']['units']
-    output_scale = 10000
-    nodata_value = np.dtype(output_dtype).type(nodata_value)
+    measurement = output_type.measurements['ndvi']
+    output_dtype = np.dtype(measurement['dtype'])
+    nodata_value = np.dtype(output_dtype).type(measurement['nodata'])
 
     if file_path.exists():
         raise OSError(errno.EEXIST, 'Output file already exists', str(file_path))
 
     measurements = ['red', 'nir']
 
-    nbar = GridWorkflow.load(task['nbar'], measurements)
+    nbar_tile = task['nbar']
+    nbar = GridWorkflow.load(nbar_tile, measurements)
 
-    nbar_masked = mask_valid_data(nbar)
-    ndvi_array = (nbar_masked.nir - nbar_masked.red) / (nbar_masked.nir + nbar_masked.red)
-    ndvi_out = (ndvi_array * output_scale).fillna(nodata_value).astype(output_dtype)
-    ndvi_out.attrs = {
-        'crs': nbar.attrs['crs'],
-        'units': output_units,
-        'nodata': nodata_value,
-    }
-
-    ndvi = xarray.Dataset({'ndvi': ndvi_out}, coords=nbar.coords, attrs=nbar.attrs)
+    ndvi = calculate_ndvi(nbar, nodata=nodata_value, dtype=output_dtype, units=measurement['units'])
 
     def _make_dataset(labels, sources):
         assert len(sources)
-        geobox = task['nbar']['geobox']
-        source_data = functools.reduce(union_points, (dataset.extent.to_crs(geobox.crs).points for dataset in sources))
+        geobox = nbar.geobox
+        source_data = union_points(*[dataset.extent.to_crs(geobox.crs).points for dataset in sources])
         valid_data = intersect_points(geobox.extent.points, source_data)
         dataset = make_dataset(dataset_type=output_type,
                                sources=sources,
@@ -178,59 +166,42 @@ def do_ndvi_task(config, task):
                                app_info=get_app_metadata(config),
                                valid_data=GeoPolygon(valid_data, geobox.crs))
         return dataset
-    sources = task['nbar']['sources']
-    datasets = xr_apply(sources, _make_dataset, dtype='O')
+
+    datasets = xr_apply(nbar_tile.sources, _make_dataset, dtype='O')
     ndvi['dataset'] = datasets_to_doc(datasets)
 
-    write_dataset_to_netcdf(ndvi, global_attributes, variable_params, Path(file_path))
-
+    write_dataset_to_netcdf(
+        dataset=ndvi,
+        filename=Path(file_path),
+        global_attributes=global_attributes,
+        variable_params=variable_params,
+    )
     return datasets
 
 
-app_name = 'ndvi'
+APP_NAME = 'ndvi'
 
 
-@click.command(name=app_name)
-@ui.pass_index(app_name=app_name)
-@click.option('--dry-run', is_flag=True, default=False, help='Check if everything is ok')
+@click.command(name=APP_NAME)
+@ui.pass_index(app_name=APP_NAME)
+@click.option('--dry-run', is_flag=True, default=False, help='Check if output files already exist')
 @click.option('--year', type=click.IntRange(1960, 2060), help='Limit the process to a particular year')
-@click.option('--backlog', type=click.IntRange(1, 100000), default=3200, help='Number of tasks to queue at the start ')
+@click.option('--backlog', type=click.IntRange(1, 100000), default=3200, help='Number of tasks to queue at the start')
 @task_app_options
 @task_app(make_config=make_ndvi_config, make_tasks=make_ndvi_tasks)
 def ndvi_app(index, config, tasks, executor, dry_run, backlog, *args, **kwargs):
     click.echo('Starting NDVI processing...')
 
     if dry_run:
-        existing_files = []
-        total = 0
-        for task in tasks:
-            total += 1
-            file_path = Path(task['filename'])
-            file_info = ''
-            if file_path.exists():
-                existing_files.append(file_path)
-                file_info = ' - ALREADY EXISTS: {}'.format(file_path)
-            click.echo('Task: {}{}'.format(task['tile_index'], file_info))
-
-        if existing_files:
-            if click.confirm('There were {} existing files found that are not indexed. Delete those files now?'.format(
-                    len(existing_files))):
-                for file_path in existing_files:
-                    file_path.unlink()
-
-        click.echo('{total} tasks total to be run ({valid} valid tasks, {invalid} invalid tasks)'.format(
-            total=total, valid=total-len(existing_files), invalid=len(existing_files)
-        ))
-        click.echo('Dry-run complete')
+        check_existing_files((task['filename'] for task in tasks))
         return 0
 
     results = []
     tasks_backlog = itertools.islice(tasks, backlog)
     for task in tasks_backlog:
-        _LOG.info('Queuing task: {}'.format(task['tile_index']))
+        _LOG.info('Queuing task: %s', task['tile_index'])
         results.append(executor.submit(do_ndvi_task, config=config, task=task))
-
-    _LOG.info('Backlog queue filled, waiting for first result...')
+    click.echo('Backlog queue filled, waiting for first result...')
 
     successful = failed = 0
     while results:
@@ -239,7 +210,7 @@ def ndvi_app(index, config, tasks, executor, dry_run, backlog, *args, **kwargs):
         # submit a new task to replace the one we just finished
         task = next(tasks, None)
         if task:
-            _LOG.info('Queuing task: {}'.format(task['tile_index']))
+            _LOG.info('Queuing task: %s', task['tile_index'])
             results.append(executor.submit(do_ndvi_task, config=config, task=task))
 
         # Process the result
@@ -258,4 +229,8 @@ def ndvi_app(index, config, tasks, executor, dry_run, backlog, *args, **kwargs):
             executor.release(result)
 
     click.echo('%d successful, %d failed' % (successful, failed))
-    _LOG.info('Completed: %d successful, %d failed' % (successful, failed))
+    _LOG.info('Completed: %d successful, %d failed', successful, failed)
+
+
+if __name__ == '__main__':
+    ndvi_app()
