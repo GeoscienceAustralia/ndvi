@@ -102,8 +102,8 @@ def make_ndvi_tasks(index, config, year=None, **kwargs):
         task.update(task_kwargs)
         return task
 
-    tasks = [make_task(tile, tile_index=key, filename=get_filename(config, tile_index=key, sources=tile.sources))
-             for key, tile in tiles_in.items() if key not in tiles_out]
+    tasks = (make_task(tile, tile_index=key, filename=get_filename(config, tile_index=key, sources=tile.sources))
+             for key, tile in tiles_in.items() if key not in tiles_out)
 
     _LOG.info('%s tasks discovered', len(tasks))
     return tasks
