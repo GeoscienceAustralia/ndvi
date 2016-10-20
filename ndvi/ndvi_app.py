@@ -104,8 +104,6 @@ def make_ndvi_tasks(index, config, year=None, **kwargs):
 
     tasks = (make_task(tile, tile_index=key, filename=get_filename(config, tile_index=key, sources=tile.sources))
              for key, tile in tiles_in.items() if key not in tiles_out)
-
-    _LOG.info('%s tasks discovered', len(tasks))
     return tasks
 
 
@@ -202,10 +200,11 @@ APP_NAME = 'ndvi'
 @ui.pass_index(app_name=APP_NAME)
 @click.option('--dry-run', is_flag=True, default=False, help='Check if output files already exist')
 @click.option('--year', callback=validate_year, help='Limit the process to a particular year')
-@click.option('--backlog', type=click.IntRange(1, 100000), default=3200, help='Number of tasks to queue at the start')
+@click.option('--queue-size', '--backlog', type=click.IntRange(1, 100000), default=3200,
+              help='Number of tasks to queue')
 @task_app_options
 @task_app(make_config=make_ndvi_config, make_tasks=make_ndvi_tasks)
-def ndvi_app(index, config, tasks, executor, dry_run, backlog, *args, **kwargs):
+def ndvi_app(index, config, tasks, executor, dry_run, queue_size, *args, **kwargs):
     click.echo('Starting NDVI processing...')
 
     if dry_run:
@@ -213,11 +212,12 @@ def ndvi_app(index, config, tasks, executor, dry_run, backlog, *args, **kwargs):
         return 0
 
     results = []
-    tasks_backlog = itertools.islice(tasks, backlog)
-    for task in tasks_backlog:
-        _LOG.info('Queuing task: %s', task['tile_index'])
+    task_queue = itertools.islice(tasks, queue_size)
+    for task in task_queue:
+        _LOG.info('Running task: %s', task['tile_index'])
         results.append(executor.submit(do_ndvi_task, config=config, task=task))
-    click.echo('Backlog queue filled, waiting for first result...')
+
+    click.echo('Task queue filled, waiting for first result...')
 
     successful = failed = 0
     while results:
@@ -226,7 +226,7 @@ def ndvi_app(index, config, tasks, executor, dry_run, backlog, *args, **kwargs):
         # submit a new task to replace the one we just finished
         task = next(tasks, None)
         if task:
-            _LOG.info('Queuing task: %s', task['tile_index'])
+            _LOG.info('Running task: %s', task['tile_index'])
             results.append(executor.submit(do_ndvi_task, config=config, task=task))
 
         # Process the result
